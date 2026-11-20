@@ -28,6 +28,7 @@ import (
 	"github.com/getsops/sops/v3/cmd/sops/common"
 	"github.com/getsops/sops/v3/cmd/sops/subcommand/exec"
 	filestatuscmd "github.com/getsops/sops/v3/cmd/sops/subcommand/filestatus"
+	diffcmd "github.com/getsops/sops/v3/cmd/sops/subcommand/diff"
 	"github.com/getsops/sops/v3/cmd/sops/subcommand/groups"
 	keyservicecmd "github.com/getsops/sops/v3/cmd/sops/subcommand/keyservice"
 	publishcmd "github.com/getsops/sops/v3/cmd/sops/subcommand/publish"
@@ -506,6 +507,119 @@ func main() {
 				if err != nil {
 					log.Errorf("Error running keyservice: %s", err)
 					return err
+				}
+				return nil
+			},
+		},
+		{
+			Name:      "diff",
+			Usage:     "compare two encrypted files' plaintext values without writing plaintext to disk",
+			ArgsUsage: `file-a file-b`,
+			Flags: append([]cli.Flag{
+				cli.StringFlag{
+					Name:  "input-type",
+					Usage: "currently ini, json, yaml, dotenv and binary are supported. Applied to both files unless --input-type-b is set. If not set, each file's extension determines its type",
+				},
+				cli.StringFlag{
+					Name:  "input-type-b",
+					Usage: "input type for the second file, when the two files use different formats",
+				},
+				cli.StringSliceFlag{
+					Name:  "path",
+					Usage: "only compare leaves under this path prefix, e.g. '[\"db\"]'. Can be specified more than once",
+				},
+				cli.BoolFlag{
+					Name:  "show-sensitive",
+					Usage: "display real values for sensitive keys (passwords, tokens, ...). They are masked by default",
+				},
+				cli.BoolFlag{
+					Name:  "show-equal",
+					Usage: "also print leaves whose values are identical on both sides",
+				},
+				cli.BoolFlag{
+					Name:  "ignore-mac",
+					Usage: "ignore Message Authentication Code during decryption",
+				},
+				cli.StringFlag{
+					Name:   "decryption-order",
+					Usage:  "comma separated list of decryption key types",
+					EnvVar: "SOPS_DECRYPTION_ORDER",
+				},
+			}, keyserviceFlags...),
+			Action: func(c *cli.Context) error {
+				if c.Bool("verbose") || c.GlobalBool("verbose") {
+					logging.SetLevel(logrus.DebugLevel)
+				}
+				if c.NArg() != 2 {
+					return common.NewExitError("Error: diff requires exactly two file arguments: `sops diff file-a file-b`", codes.NoFileSpecified)
+				}
+
+				pathA, err := filepath.Abs(c.Args()[0])
+				if err != nil {
+					return toExitError(err)
+				}
+				pathB, err := filepath.Abs(c.Args()[1])
+				if err != nil {
+					return toExitError(err)
+				}
+				for _, p := range []string{pathA, pathB} {
+					if _, err := os.Stat(p); os.IsNotExist(err) {
+						return common.NewExitError(fmt.Sprintf("Error: cannot operate on non-existent file %q", p), codes.NoFileSpecified)
+					}
+				}
+
+				storeA, err := inputStore(c, pathA)
+				if err != nil {
+					return toExitError(err)
+				}
+				// The second file may have a different extension/format.
+				overrideB := c.String("input-type-b")
+				var storeB sops.Store
+				if overrideB != "" {
+					storesConf, err := loadStoresConfig(c, pathB)
+					if err != nil {
+						return toExitError(err)
+					}
+					storeB = common.DefaultStoreForPathOrFormat(storesConf, pathB, overrideB)
+				} else {
+					storeB, err = inputStore(c, pathB)
+					if err != nil {
+						return toExitError(err)
+					}
+				}
+
+				var prefixes [][]interface{}
+				for _, raw := range c.StringSlice("path") {
+					prefix, err := parseTreePath(raw)
+					if err != nil {
+						return common.NewExitError(fmt.Errorf("error parsing --path prefix: %s", err), codes.InvalidTreePathFormat)
+					}
+					prefixes = append(prefixes, prefix)
+				}
+
+				order, err := decryptionOrder(c.String("decryption-order"))
+				if err != nil {
+					return toExitError(err)
+				}
+
+				_, err = diffcmd.Run(diffcmd.Opts{
+					InputStoreA:     storeA,
+					InputStoreB:     storeB,
+					InputPathA:      pathA,
+					InputPathB:      pathB,
+					KeyServices:     keyservices(c),
+					DecryptionOrder: order,
+					IgnoreMAC:       c.Bool("ignore-mac"),
+					PathPrefixes:    prefixes,
+					ShowSensitive:   c.Bool("show-sensitive"),
+					ShowEqual:       c.Bool("show-equal"),
+					Writer:          c.App.Writer,
+				})
+				if err != nil {
+					if exitErr, ok := err.(cli.ExitCoder); ok && exitErr != nil {
+						return exitErr
+					}
+					return toExitError(err)
 				}
 				return nil
 			},
