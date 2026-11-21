@@ -76,6 +76,14 @@ func warnMoreThanOnePositionalArgument(c *cli.Context) {
 
 func main() {
 	cli.VersionPrinter = version.PrintVersion
+	if err := newApp().Run(os.Args); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// newApp builds the sops CLI. It is separate from main so tests can drive
+// commands in-process.
+func newApp() *cli.App {
 	app := cli.NewApp()
 
 	keyserviceFlags := []cli.Flag{
@@ -782,6 +790,7 @@ func main() {
 				return nil
 			},
 		},
+		rotationLogCommand(),
 		{
 			Name:      "decrypt",
 			Usage:     "decrypt a file, and output the results to stdout. If no filename is provided, stdin will be used.",
@@ -1200,6 +1209,14 @@ func main() {
 					Usage:  "comma separated list of decryption key types",
 					EnvVar: "SOPS_DECRYPTION_ORDER",
 				},
+				cli.StringFlag{
+					Name:  rotationLogFlagName,
+					Usage: "write an append-only audit trail of this rotation to the given directory (opt-in)",
+				},
+				cli.StringFlag{
+					Name:  "rotation-root",
+					Usage: "make recorded file paths relative to this directory (default: current working directory)",
+				},
 			}, keyserviceFlags...),
 			Action: func(c *cli.Context) error {
 				if c.Bool("verbose") {
@@ -1207,6 +1224,13 @@ func main() {
 				}
 				if c.NArg() < 1 {
 					return common.NewExitError("Error: no file specified", codes.NoFileSpecified)
+				}
+				if rotationLogEnabled(c) {
+					logDir, err := applyRotationRoot(c)
+					if err != nil {
+						return err
+					}
+					return rotateWithLog(c, c.Args(), c.Bool("in-place"), logDir)
 				}
 				warnMoreThanOnePositionalArgument(c)
 				if c.Bool("in-place") && c.String("output") != "" {
@@ -1888,6 +1912,14 @@ func main() {
 			Usage:  "comma separated list of decryption key types",
 			EnvVar: "SOPS_DECRYPTION_ORDER",
 		},
+		cli.StringFlag{
+			Name:  rotationLogFlagName,
+			Usage: "write an append-only audit trail of this rotation to the given directory (opt-in)",
+		},
+		cli.StringFlag{
+			Name:  "rotation-root",
+			Usage: "make recorded file paths relative to this directory (default: current working directory)",
+		},
 	}, keyserviceFlags...)
 
 	app.Action = func(c *cli.Context) error {
@@ -1928,6 +1960,17 @@ func main() {
 			if err != nil {
 				return toExitError(err)
 			}
+		}
+
+		if isRotateMode && rotationLogEnabled(c) {
+			// The audited path resolves per-file stores itself, so the
+			// single-file loads above would be wasted work. Do this before
+			// them to keep the opt-in path from paying for both.
+			logDir, err := applyRotationRoot(c)
+			if err != nil {
+				return err
+			}
+			return rotateWithLog(c, c.Args(), c.Bool("in-place"), logDir)
 		}
 
 		commandCount := 0
@@ -2013,6 +2056,13 @@ func main() {
 			})
 		}
 		if isRotateMode {
+			if rotationLogEnabled(c) {
+				logDir, err := applyRotationRoot(c)
+				if err != nil {
+					return err
+				}
+				return rotateWithLog(c, c.Args(), c.Bool("in-place"), logDir)
+			}
 			rotateOpts, err := getRotateOpts(c, fileName, inputStore, outputStore, svcs, order)
 			if err != nil {
 				return toExitError(err)
@@ -2111,10 +2161,7 @@ func main() {
 		_, err = outputFile.Write(output)
 		return toExitError(err)
 	}
-	err := app.Run(os.Args)
-	if err != nil {
-		log.Fatal(err)
-	}
+	return app
 }
 
 func getEncryptConfig(c *cli.Context, fileName string, inputStore common.Store, optionalConfig *config.Config) (encryptConfig, error) {
