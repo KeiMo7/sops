@@ -272,6 +272,10 @@ func LoadEncryptedFileWithBugFixes(opts GenericDecryptOpts) (*sops.Tree, error) 
 
 // FixAWSKMSEncryptionContextBug is used to fix the issue described in https://github.com/mozilla/sops/pull/435
 func FixAWSKMSEncryptionContextBug(opts GenericDecryptOpts, tree *sops.Tree) (*sops.Tree, error) {
+	baseline, err := SnapshotBaseline(opts.InputPath)
+	if err != nil {
+		return nil, err
+	}
 	message := "Up until version 3.3.0 of sops there was a bug surrounding the " +
 		"use of encryption context with AWS KMS." +
 		"\nYou can read the full description of the issue here:" +
@@ -340,13 +344,12 @@ func FixAWSKMSEncryptionContextBug(opts GenericDecryptOpts, tree *sops.Tree) (*s
 		return nil, NewExitError(fmt.Sprintf("Could not marshal tree: %s", err), codes.ErrorDumpingTree)
 	}
 
-	file, err := os.Create(opts.InputPath)
-	if err != nil {
-		return nil, NewExitError(fmt.Sprintf("Could not open file for writing: %s", err), codes.CouldNotWriteOutputFile)
-	}
-	defer file.Close()
-	_, err = file.Write(encryptedFile)
-	if err != nil {
+	if err := WriteFile(WriteFileOptions{
+		Path:     opts.InputPath,
+		Data:     encryptedFile,
+		Verify:   EncryptedFileVerifier(opts.InputStore, opts.Cipher, opts.KeyServices, opts.DecryptionOrder, opts.IgnoreMAC),
+		Baseline: &baseline,
+	}); err != nil {
 		return nil, err
 	}
 

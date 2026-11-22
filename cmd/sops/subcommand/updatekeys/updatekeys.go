@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/getsops/sops/v3/aes"
+	"github.com/getsops/sops/v3/cmd/sops/atomic"
 	"github.com/getsops/sops/v3/cmd/sops/codes"
 	"github.com/getsops/sops/v3/cmd/sops/common"
 	"github.com/getsops/sops/v3/config"
@@ -48,6 +50,13 @@ func updateFile(opts Opts) error {
 	store := common.DefaultStoreForPathOrFormat(sc, opts.InputPath, opts.InputType)
 	log.Printf("Syncing keys for file %s", opts.InputPath)
 	tree, err := common.LoadEncryptedFile(store, opts.InputPath)
+	if err != nil {
+		return err
+	}
+	// Record the on-disk identity right after loading so that a concurrent
+	// modification during the (potentially interactive) update is detected
+	// at commit time instead of being overwritten.
+	baseline, err := common.SnapshotBaseline(opts.InputPath)
 	if err != nil {
 		return err
 	}
@@ -112,14 +121,25 @@ func updateFile(opts Opts) error {
 	if err != nil {
 		return common.NewExitError(fmt.Sprintf("Could not marshal tree: %s", err), codes.ErrorDumpingTree)
 	}
-	outputFile, err := os.Create(opts.InputPath)
+	// Crash-safe replacement: staging file in the same directory, fsync,
+	// decryptability proof, then atomic rename. A failure here leaves the
+	// previous file byte-for-byte intact so the remaining files in the
+	// batch and a later retry can proceed without data loss.
+	verifier := common.EncryptedFileVerifier(store, aes.NewCipher(), opts.KeyServices, opts.DecryptionOrder, false)
+	err = common.WriteFile(common.WriteFileOptions{
+		Path:     opts.InputPath,
+		Data:     output,
+		Verify:   verifier,
+		Baseline: &baseline,
+	})
 	if err != nil {
-		return fmt.Errorf("could not open file for writing: %s", err)
-	}
-	defer outputFile.Close()
-	_, err = outputFile.Write(output)
-	if err != nil {
-		return fmt.Errorf("error writing to file: %s", err)
+		if common.IsWriteConflict(err) || common.IsWriteLocked(err) {
+			return common.NewExitError(
+				fmt.Sprintf("File %s was modified by another process; leaving it unchanged: %s",
+					opts.InputPath, atomic.ErrConflict),
+				codes.CouldNotWriteOutputFile)
+		}
+		return err
 	}
 	log.Printf("File %s synced with new keys", opts.InputPath)
 	return nil

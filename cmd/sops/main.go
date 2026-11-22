@@ -892,30 +892,14 @@ func main() {
 				// We open the file *after* the operations on the tree have been
 				// executed to avoid truncating it when there's errors
 				if c.Bool("in-place") {
-					file, err := os.Create(fileName)
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
+					verifier := common.EncryptedFileVerifier(outputStore, aes.NewCipher(), svcs, order, c.Bool("ignore-mac"))
+					if err := writeInPlace(fileName, output, verifier); err != nil {
+						return err
 					}
-					defer file.Close()
-					_, err = file.Write(output)
-					if err != nil {
-						return toExitError(err)
-					}
-					log.Info("File written successfully")
 					return nil
 				}
 
-				outputFile := os.Stdout
-				if c.String("output") != "" {
-					file, err := os.Create(c.String("output"))
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open output file for writing: %s", err), codes.CouldNotWriteOutputFile)
-					}
-					defer file.Close()
-					outputFile = file
-				}
-				_, err = outputFile.Write(output)
-				return toExitError(err)
+				return writeOutput(c.String("output"), output)
 			},
 		},
 		{
@@ -1084,30 +1068,14 @@ func main() {
 				// We open the file *after* the operations on the tree have been
 				// executed to avoid truncating it when there's errors
 				if c.Bool("in-place") {
-					file, err := os.Create(fileName)
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
+					verifier := common.EncryptedFileVerifier(outputStore, aes.NewCipher(), svcs, nil, c.Bool("ignore-mac"))
+					if err := writeInPlace(fileName, output, verifier); err != nil {
+						return err
 					}
-					defer file.Close()
-					_, err = file.Write(output)
-					if err != nil {
-						return toExitError(err)
-					}
-					log.Info("File written successfully")
 					return nil
 				}
 
-				outputFile := os.Stdout
-				if c.String("output") != "" {
-					file, err := os.Create(c.String("output"))
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open output file for writing: %s", err), codes.CouldNotWriteOutputFile)
-					}
-					defer file.Close()
-					outputFile = file
-				}
-				_, err = outputFile.Write(output)
-				return toExitError(err)
+				return writeOutput(c.String("output"), output)
 			},
 		},
 		{
@@ -1259,30 +1227,14 @@ func main() {
 				// We open the file *after* the operations on the tree have been
 				// executed to avoid truncating it when there's errors
 				if c.Bool("in-place") {
-					file, err := os.Create(fileName)
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
+					verifier := common.EncryptedFileVerifier(outputStore, aes.NewCipher(), svcs, order, c.Bool("ignore-mac"))
+					if err := writeInPlace(fileName, output, verifier); err != nil {
+						return err
 					}
-					defer file.Close()
-					_, err = file.Write(output)
-					if err != nil {
-						return toExitError(err)
-					}
-					log.Info("File written successfully")
 					return nil
 				}
 
-				outputFile := os.Stdout
-				if c.String("output") != "" {
-					file, err := os.Create(c.String("output"))
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open output file for writing: %s", err), codes.CouldNotWriteOutputFile)
-					}
-					defer file.Close()
-					outputFile = file
-				}
-				_, err = outputFile.Write(output)
-				return toExitError(err)
+				return writeOutput(c.String("output"), output)
 			},
 		},
 		{
@@ -1437,16 +1389,10 @@ func main() {
 
 				// We open the file *after* the operations on the tree have been
 				// executed to avoid truncating it when there's errors
-				file, err := os.Create(fileName)
-				if err != nil {
-					return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
+				verifier := common.EncryptedFileVerifier(outputStore, aes.NewCipher(), svcs, order, c.Bool("ignore-mac"))
+				if err := writeInPlace(fileName, output, verifier); err != nil {
+					return err
 				}
-				defer file.Close()
-				_, err = file.Write(output)
-				if err != nil {
-					return toExitError(err)
-				}
-				log.Info("File written successfully")
 				return nil
 			},
 		},
@@ -1573,16 +1519,10 @@ func main() {
 
 				// We open the file *after* the operations on the tree have been
 				// executed to avoid truncating it when there's errors
-				file, err := os.Create(fileName)
-				if err != nil {
-					return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
+				verifier := common.EncryptedFileVerifier(outputStore, aes.NewCipher(), svcs, order, c.Bool("ignore-mac"))
+				if err := writeInPlace(fileName, output, verifier); err != nil {
+					return err
 				}
-				defer file.Close()
-				_, err = file.Write(output)
-				if err != nil {
-					return toExitError(err)
-				}
-				log.Info("File written successfully")
 				return nil
 			},
 		},
@@ -1667,16 +1607,10 @@ func main() {
 
 				// We open the file *after* the operations on the tree have been
 				// executed to avoid truncating it when there's errors
-				file, err := os.Create(fileName)
-				if err != nil {
-					return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
+				verifier := common.EncryptedFileVerifier(outputStore, aes.NewCipher(), svcs, order, c.Bool("ignore-mac"))
+				if err := writeInPlace(fileName, output, verifier); err != nil {
+					return err
 				}
-				defer file.Close()
-				_, err = file.Write(output)
-				if err != nil {
-					return toExitError(err)
-				}
-				log.Info("File written successfully")
 				return nil
 			},
 		},
@@ -2086,30 +2020,14 @@ func main() {
 		// We open the file *after* the operations on the tree have been
 		// executed to avoid truncating it when there's errors
 		if c.Bool("in-place") || isEditMode || isSetMode {
-			file, err := os.Create(fileName)
-			if err != nil {
-				return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
+			verifier := common.EncryptedFileVerifier(outputStore, aes.NewCipher(), svcs, order, c.Bool("ignore-mac"))
+			if err := writeInPlace(fileName, output, verifier); err != nil {
+				return err
 			}
-			defer file.Close()
-			_, err = file.Write(output)
-			if err != nil {
-				return toExitError(err)
-			}
-			log.Info("File written successfully")
 			return nil
 		}
 
-		outputFile := os.Stdout
-		if c.String("output") != "" {
-			file, err := os.Create(c.String("output"))
-			if err != nil {
-				return common.NewExitError(fmt.Sprintf("Could not open output file for writing: %s", err), codes.CouldNotWriteOutputFile)
-			}
-			defer file.Close()
-			outputFile = file
-		}
-		_, err = outputFile.Write(output)
-		return toExitError(err)
+		return writeOutput(c.String("output"), output)
 	}
 	err := app.Run(os.Args)
 	if err != nil {

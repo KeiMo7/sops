@@ -1,11 +1,11 @@
 package groups
 
 import (
+	"fmt"
 	"os"
 
-	"fmt"
-
 	"github.com/getsops/sops/v3"
+	"github.com/getsops/sops/v3/aes"
 	"github.com/getsops/sops/v3/cmd/sops/common"
 	"github.com/getsops/sops/v3/keyservice"
 )
@@ -20,6 +20,7 @@ type DeleteOpts struct {
 	InPlace         bool
 	KeyServices     []keyservice.KeyServiceClient
 	DecryptionOrder []string
+	IgnoreMAC       bool
 }
 
 // Delete deletes a key group from a SOPS file
@@ -49,15 +50,21 @@ func Delete(opts DeleteOpts) error {
 	if err != nil {
 		return err
 	}
-	var outputFile = os.Stdout
-	if opts.InPlace {
-		var err error
-		outputFile, err = os.Create(opts.InputPath)
-		if err != nil {
-			return err
-		}
-		defer outputFile.Close()
+	if !opts.InPlace {
+		// Streaming path: behavior unchanged.
+		_, err = os.Stdout.Write(output)
+		return err
 	}
-	outputFile.Write(output)
-	return nil
+	verifier := common.EncryptedFileVerifier(opts.OutputStore, aes.NewCipher(),
+		opts.KeyServices, opts.DecryptionOrder, opts.IgnoreMAC)
+	baseline, err := common.SnapshotBaseline(opts.InputPath)
+	if err != nil {
+		return err
+	}
+	return common.WriteFile(common.WriteFileOptions{
+		Path:     opts.InputPath,
+		Data:     output,
+		Verify:   verifier,
+		Baseline: &baseline,
+	})
 }
