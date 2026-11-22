@@ -1,0 +1,28 @@
+# Example scope policy for `sops keyservice --policy`.
+#
+# Callers are matched by client certificate common name, DNS SAN or URI SAN,
+# using '*' and '?' wildcards. "anonymous" matches callers admitted by
+# --allow-anonymous, "local" matches in-process calls.
+#
+# Keys are matched as "<type>" or "<type>:<identifier glob>". Types: kms, pgp,
+# gcp_kms, azure_kv, hc_vault, age, hckms, or "*" for any type.
+#
+# The first matching rule decides. A caller that matches no rule is denied.
+rules:
+  - name: ops-decrypt
+    callers:
+      - "ops-*"
+      - "DNS=ops.example.com"
+    keys:
+      - "age:age1ops*"
+      - "pgp:*"
+    operations:
+      - decrypt
+
+  - name: build-encrypt
+    callers:
+      - "CN=build-client"
+    keys:
+      - "kms:arn:aws:kms:eu-west-1:123456789012:key/*"
+    operations:
+      - encrypt

@@ -13,11 +13,11 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/getsops/sops/v3"
 	"github.com/getsops/sops/v3/aes"
@@ -88,6 +88,36 @@ func main() {
 			Name:   "keyservice",
 			Usage:  "Specify the key services to use in addition to the local one. Can be specified more than once. Syntax: protocol://address. Example: tcp://myserver.com:5000",
 			EnvVar: "SOPS_KEYSERVICE",
+		},
+		cli.StringFlag{
+			Name:   "keyservice-tls-ca",
+			Usage:  "CA bundle used to verify the key service server certificate. Enables TLS for remote key services.",
+			EnvVar: "SOPS_KEYSERVICE_TLS_CA",
+		},
+		cli.StringFlag{
+			Name:   "keyservice-tls-cert",
+			Usage:  "client certificate presented to the key service for caller authentication",
+			EnvVar: "SOPS_KEYSERVICE_TLS_CERT",
+		},
+		cli.StringFlag{
+			Name:   "keyservice-tls-key",
+			Usage:  "private key matching --keyservice-tls-cert",
+			EnvVar: "SOPS_KEYSERVICE_TLS_KEY",
+		},
+		cli.StringFlag{
+			Name:   "keyservice-tls-server-name",
+			Usage:  "server name to verify in the key service certificate (defaults to the dialed host)",
+			EnvVar: "SOPS_KEYSERVICE_TLS_SERVER_NAME",
+		},
+		cli.StringFlag{
+			Name:   "keyservice-tls-expected-server-identity",
+			Usage:  "pin the key service to this CN, DNS or URI SAN; refuse to continue if it does not match",
+			EnvVar: "SOPS_KEYSERVICE_TLS_EXPECTED_SERVER_IDENTITY",
+		},
+		cli.DurationFlag{
+			Name:   "keyservice-timeout",
+			Usage:  "per-request timeout for remote key service calls (e.g. 10s); the server releases the backend call when it expires",
+			EnvVar: "SOPS_KEYSERVICE_TIMEOUT",
 		},
 	}
 	app.Name = "sops"
@@ -222,7 +252,10 @@ func main() {
 					return toExitError(err)
 				}
 
-				svcs := keyservices(c)
+				svcs, err := keyservices(c)
+				if err != nil {
+					return toExitError(err)
+				}
 
 				order, err := decryptionOrder(c.String("decryption-order"))
 				if err != nil {
@@ -340,7 +373,10 @@ func main() {
 					return toExitError(err)
 				}
 
-				svcs := keyservices(c)
+				svcs, err := keyservices(c)
+				if err != nil {
+					return toExitError(err)
+				}
 
 				order, err := decryptionOrder(c.String("decryption-order"))
 				if err != nil {
@@ -445,12 +481,16 @@ func main() {
 						if err != nil {
 							return toExitError(err)
 						}
+						svcs, err := keyservices(c)
+						if err != nil {
+							return toExitError(err)
+						}
 						err = publishcmd.Run(publishcmd.Opts{
 							ConfigPath:      configPath,
 							InputPath:       subPath,
 							RootPath:        path,
 							Cipher:          aes.NewCipher(),
-							KeyServices:     keyservices(c),
+							KeyServices:     svcs,
 							DecryptionOrder: order,
 							InputStore:      inputStore,
 							Interactive:     !c.Bool("yes"),
@@ -489,6 +529,79 @@ func main() {
 					Name:  "prompt",
 					Usage: "Prompt user to confirm every incoming request",
 				},
+				cli.StringFlag{
+					Name:   "tls-cert",
+					Usage:  "TLS certificate for the key service (enables transport encryption)",
+					EnvVar: "SOPS_KEYSERVICE_TLS_CERT",
+				},
+				cli.StringFlag{
+					Name:   "tls-key",
+					Usage:  "private key matching --tls-cert",
+					EnvVar: "SOPS_KEYSERVICE_TLS_KEY",
+				},
+				cli.StringFlag{
+					Name:   "tls-client-ca",
+					Usage:  "CA bundle used to verify client certificates; enables caller authentication at the TLS handshake",
+					EnvVar: "SOPS_KEYSERVICE_TLS_CLIENT_CA",
+				},
+				cli.StringFlag{
+					Name:   "tls-min-version",
+					Usage:  "minimum TLS version: 1.2 or 1.3",
+					Value:  "1.2",
+					EnvVar: "SOPS_KEYSERVICE_TLS_MIN_VERSION",
+				},
+				cli.BoolFlag{
+					Name:   "allow-anonymous",
+					Usage:  "explicitly admit unauthenticated callers; only permitted on loopback or unix sockets",
+					EnvVar: "SOPS_KEYSERVICE_ALLOW_ANONYMOUS",
+				},
+				cli.StringFlag{
+					Name:   "policy",
+					Usage:  "YAML/JSON policy restricting which callers may use which keys",
+					EnvVar: "SOPS_KEYSERVICE_POLICY",
+				},
+				cli.DurationFlag{
+					Name:   "request-timeout",
+					Usage:  "maximum time a key backend operation may take",
+					Value:  30 * time.Second,
+					EnvVar: "SOPS_KEYSERVICE_REQUEST_TIMEOUT",
+				},
+				cli.DurationFlag{
+					Name:   "queue-timeout",
+					Usage:  "maximum time a request may wait for a free worker",
+					Value:  5 * time.Second,
+					EnvVar: "SOPS_KEYSERVICE_QUEUE_TIMEOUT",
+				},
+				cli.IntFlag{
+					Name:   "max-concurrent",
+					Usage:  "maximum number of key backend operations running concurrently",
+					Value:  4,
+					EnvVar: "SOPS_KEYSERVICE_MAX_CONCURRENT",
+				},
+				cli.IntFlag{
+					Name:   "max-queued",
+					Usage:  "maximum number of requests waiting for a worker; further requests are rejected",
+					Value:  32,
+					EnvVar: "SOPS_KEYSERVICE_MAX_QUEUED",
+				},
+				cli.Float64Flag{
+					Name:   "rate-limit",
+					Usage:  "requests per second admitted by the key service; 0 disables rate limiting",
+					Value:  0,
+					EnvVar: "SOPS_KEYSERVICE_RATE_LIMIT",
+				},
+				cli.IntFlag{
+					Name:   "rate-burst",
+					Usage:  "burst size for --rate-limit",
+					Value:  1,
+					EnvVar: "SOPS_KEYSERVICE_RATE_BURST",
+				},
+				cli.DurationFlag{
+					Name:   "metrics-period",
+					Usage:  "how often to log queue, concurrency and rejection metrics; 0 disables periodic metrics",
+					Value:  1 * time.Minute,
+					EnvVar: "SOPS_KEYSERVICE_METRICS_PERIOD",
+				},
 				cli.BoolFlag{
 					Name:  "verbose",
 					Usage: "Enable verbose logging output",
@@ -499,9 +612,23 @@ func main() {
 					logging.SetLevel(logrus.DebugLevel)
 				}
 				err := keyservicecmd.Run(keyservicecmd.Opts{
-					Network: c.String("network"),
-					Address: c.String("address"),
-					Prompt:  c.Bool("prompt"),
+					Network:         c.String("network"),
+					Address:         c.String("address"),
+					Prompt:          c.Bool("prompt"),
+					TLSCertFile:     c.String("tls-cert"),
+					TLSKeyFile:      c.String("tls-key"),
+					TLSClientCAFile: c.String("tls-client-ca"),
+					TLSMinVersion:   c.String("tls-min-version"),
+					Verbose:         c.Bool("verbose") || c.GlobalBool("verbose"),
+					AllowAnonymous:  c.Bool("allow-anonymous"),
+					PolicyPath:      c.String("policy"),
+					RequestTimeout:  c.Duration("request-timeout"),
+					QueueTimeout:    c.Duration("queue-timeout"),
+					MaxConcurrent:   c.Int("max-concurrent"),
+					MaxQueued:       c.Int("max-queued"),
+					RateLimit:       c.Float64("rate-limit"),
+					RateBurst:       c.Int("rate-burst"),
+					MetricsPeriod:   c.Duration("metrics-period"),
 				})
 				if err != nil {
 					log.Errorf("Error running keyservice: %s", err)
@@ -661,6 +788,10 @@ func main() {
 						if err != nil {
 							return toExitError(err)
 						}
+						svcs, err := keyservices(c)
+						if err != nil {
+							return toExitError(err)
+						}
 						return groups.Add(groups.AddOpts{
 							InputPath:      c.String("file"),
 							InPlace:        c.Bool("in-place"),
@@ -668,7 +799,7 @@ func main() {
 							OutputStore:    outputStore,
 							Group:          group,
 							GroupThreshold: c.Int("shamir-secret-sharing-threshold"),
-							KeyServices:    keyservices(c),
+							KeyServices:    svcs,
 						})
 					},
 				},
@@ -708,6 +839,10 @@ func main() {
 						if err != nil {
 							return toExitError(err)
 						}
+						svcs, err := keyservices(c)
+						if err != nil {
+							return toExitError(err)
+						}
 						return groups.Delete(groups.DeleteOpts{
 							InputPath:      c.String("file"),
 							InPlace:        c.Bool("in-place"),
@@ -715,7 +850,7 @@ func main() {
 							OutputStore:    outputStore,
 							Group:          uint(group),
 							GroupThreshold: c.Int("shamir-secret-sharing-threshold"),
-							KeyServices:    keyservices(c),
+							KeyServices:    svcs,
 						})
 					},
 				},
@@ -751,10 +886,14 @@ func main() {
 				}
 				failedCounter := 0
 				for _, path := range c.Args() {
-					err := updatekeys.UpdateKeys(updatekeys.Opts{
+					svcs, err := keyservices(c)
+					if err != nil {
+						return toExitError(err)
+					}
+					err = updatekeys.UpdateKeys(updatekeys.Opts{
 						InputPath:       path,
 						ShamirThreshold: c.Int("shamir-secret-sharing-threshold"),
-						KeyServices:     keyservices(c),
+						KeyServices:     svcs,
 						Interactive:     !c.Bool("yes"),
 						ConfigPath:      configPath,
 						InputType:       c.String("input-type"),
@@ -862,7 +1001,10 @@ func main() {
 				if err != nil {
 					return toExitError(err)
 				}
-				svcs := keyservices(c)
+				svcs, err := keyservices(c)
+				if err != nil {
+					return toExitError(err)
+				}
 
 				order, err := decryptionOrder(c.String("decryption-order"))
 				if err != nil {
@@ -1061,7 +1203,10 @@ func main() {
 				if err != nil {
 					return toExitError(err)
 				}
-				svcs := keyservices(c)
+				svcs, err := keyservices(c)
+				if err != nil {
+					return toExitError(err)
+				}
 
 				encConfig, err := getEncryptConfig(c, fileNameOverride, inputStore, nil)
 				if err != nil {
@@ -1240,7 +1385,10 @@ func main() {
 				if err != nil {
 					return toExitError(err)
 				}
-				svcs := keyservices(c)
+				svcs, err := keyservices(c)
+				if err != nil {
+					return toExitError(err)
+				}
 
 				order, err := decryptionOrder(c.String("decryption-order"))
 				if err != nil {
@@ -1396,7 +1544,10 @@ func main() {
 				if err != nil {
 					return toExitError(err)
 				}
-				svcs := keyservices(c)
+				svcs, err := keyservices(c)
+				if err != nil {
+					return toExitError(err)
+				}
 
 				order, err := decryptionOrder(c.String("decryption-order"))
 				if err != nil {
@@ -1518,7 +1669,10 @@ func main() {
 				if err != nil {
 					return toExitError(err)
 				}
-				svcs := keyservices(c)
+				svcs, err := keyservices(c)
+				if err != nil {
+					return toExitError(err)
+				}
 
 				path, err := parseTreePath(c.Args()[1])
 				if err != nil {
@@ -1637,7 +1791,10 @@ func main() {
 				if err != nil {
 					return toExitError(err)
 				}
-				svcs := keyservices(c)
+				svcs, err := keyservices(c)
+				if err != nil {
+					return toExitError(err)
+				}
 
 				path, err := parseTreePath(c.Args()[1])
 				if err != nil {
@@ -1967,7 +2124,10 @@ func main() {
 		if err != nil {
 			return toExitError(err)
 		}
-		svcs := keyservices(c)
+		svcs, err := keyservices(c)
+		if err != nil {
+			return toExitError(err)
+		}
 
 		order, err := decryptionOrder(c.String("decryption-order"))
 		if err != nil {
@@ -2319,23 +2479,65 @@ func toExitError(err error) error {
 	return nil
 }
 
-func keyservices(c *cli.Context) (svcs []keyservice.KeyServiceClient) {
+// keyserviceClientOptions builds and validates the remote key service client
+// configuration. TLS is enabled when any --keyservice-tls-* material is given;
+// a malformed CA, client certificate or expected server identity fails here,
+// before any file is read or any request is made.
+func keyserviceClientOptions(c *cli.Context) ([]keyservice.Option, error) {
+	var opts []keyservice.Option
+	tlsCfg := keyservice.ClientTLSConfig{
+		CAFile:                 c.String("keyservice-tls-ca"),
+		CertFile:               c.String("keyservice-tls-cert"),
+		KeyFile:                c.String("keyservice-tls-key"),
+		ServerName:             c.String("keyservice-tls-server-name"),
+		ExpectedServerIdentity: c.String("keyservice-tls-expected-server-identity"),
+	}
+	if tlsCfg.Enabled() {
+		opts = append(opts, keyservice.WithTLS(tlsCfg))
+	}
+	if c.IsSet("keyservice-timeout") {
+		timeout := c.Duration("keyservice-timeout")
+		if timeout < 0 {
+			return nil, fmt.Errorf("keyservice: --keyservice-timeout must not be negative")
+		}
+		opts = append(opts, keyservice.WithRequestTimeout(timeout))
+	}
+	return opts, nil
+}
+
+func keyservices(c *cli.Context) (svcs []keyservice.KeyServiceClient, err error) {
 	if c.Bool("enable-local-keyservice") {
 		svcs = append(svcs, keyservice.NewLocalClient())
 	}
 	uris := c.StringSlice("keyservice")
+	if len(uris) == 0 {
+		return svcs, nil
+	}
+	clientOpts, err := keyserviceClientOptions(c)
+	if err != nil {
+		return nil, err
+	}
+	// Validate the client material eagerly, before dialing, so that a
+	// missing or expired certificate fails at startup.
+	if _, err := keyservice.ResolveClientOptions(clientOpts...); err != nil {
+		return nil, err
+	}
 	for _, uri := range uris {
 		url, err := url.Parse(uri)
 		if err != nil {
-			log.WithField("uri", uri).
-				Warnf("Error parsing URI for keyservice, skipping")
-			continue
+			return nil, fmt.Errorf("keyservice: cannot parse URI %q: %w", uri, err)
 		}
 		addr := url.Host
 		addrToUse := addr
-		opts := []grpc.DialOption{
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		dialOpts, err := keyservice.ResolveClientOptions(clientOpts...)
+		if err != nil {
+			return nil, err
 		}
+		grpcOpts, err := dialOpts.DialOptions()
+		if err != nil {
+			return nil, err
+		}
+		opts := append([]grpc.DialOption{}, grpcOpts...)
 		if url.Scheme == "unix" {
 			addr = url.Path
 			addrToUse = uri
@@ -2353,11 +2555,15 @@ func keyservices(c *cli.Context) (svcs []keyservice.KeyServiceClient) {
 		).Infof("Connecting to key service")
 		conn, err := grpc.NewClient(addrToUse, opts...)
 		if err != nil {
-			log.Fatalf("failed to listen: %v", err)
+			return nil, fmt.Errorf("keyservice: failed to dial %q: %w", addrToUse, err)
 		}
-		svcs = append(svcs, keyservice.NewKeyServiceClient(conn))
+		client, err := keyservice.NewRemoteClient(conn, clientOpts...)
+		if err != nil {
+			return nil, err
+		}
+		svcs = append(svcs, client)
 	}
-	return
+	return svcs, nil
 }
 
 // Wrapper of config.LookupConfigFile that takes care of handling the returned warning.
