@@ -340,14 +340,11 @@ func FixAWSKMSEncryptionContextBug(opts GenericDecryptOpts, tree *sops.Tree) (*s
 		return nil, NewExitError(fmt.Sprintf("Could not marshal tree: %s", err), codes.ErrorDumpingTree)
 	}
 
-	file, err := os.Create(opts.InputPath)
-	if err != nil {
-		return nil, NewExitError(fmt.Sprintf("Could not open file for writing: %s", err), codes.CouldNotWriteOutputFile)
-	}
-	defer file.Close()
-	_, err = file.Write(encryptedFile)
-	if err != nil {
-		return nil, err
+	if err := WriteFileAtomic(AtomicWriteOpts{
+		Path: opts.InputPath,
+		Data: encryptedFile,
+	}); err != nil {
+		return nil, NewExitError(fmt.Sprintf("Could not write file: %s", err), codes.CouldNotWriteOutputFile)
 	}
 
 	newTree, err := LoadEncryptedFile(opts.InputStore, opts.InputPath)

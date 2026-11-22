@@ -3,6 +3,7 @@ package main // import "github.com/getsops/sops/v3/cmd/sops"
 import (
 	"context"
 	encodingjson "encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -889,20 +890,11 @@ func main() {
 					return toExitError(err)
 				}
 
-				// We open the file *after* the operations on the tree have been
-				// executed to avoid truncating it when there's errors
+				// The file is replaced only after the operations on the tree have
+				// succeeded, so that it is not truncated when there's errors. The
+				// output of decrypt is plaintext, so it must not be readable by others.
 				if c.Bool("in-place") {
-					file, err := os.Create(fileName)
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
-					}
-					defer file.Close()
-					_, err = file.Write(output)
-					if err != nil {
-						return toExitError(err)
-					}
-					log.Info("File written successfully")
-					return nil
+					return writeInPlace(fileName, output, true)
 				}
 
 				outputFile := os.Stdout
@@ -1081,20 +1073,10 @@ func main() {
 					return toExitError(err)
 				}
 
-				// We open the file *after* the operations on the tree have been
-				// executed to avoid truncating it when there's errors
+				// The file is replaced only after the operations on the tree have
+				// succeeded, so that it is not truncated when there's errors
 				if c.Bool("in-place") {
-					file, err := os.Create(fileName)
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
-					}
-					defer file.Close()
-					_, err = file.Write(output)
-					if err != nil {
-						return toExitError(err)
-					}
-					log.Info("File written successfully")
-					return nil
+					return writeInPlace(fileName, output, false)
 				}
 
 				outputFile := os.Stdout
@@ -1256,20 +1238,10 @@ func main() {
 					return toExitError(err)
 				}
 
-				// We open the file *after* the operations on the tree have been
-				// executed to avoid truncating it when there's errors
+				// The file is replaced only after the operations on the tree have
+				// succeeded, so that it is not truncated when there's errors
 				if c.Bool("in-place") {
-					file, err := os.Create(fileName)
-					if err != nil {
-						return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
-					}
-					defer file.Close()
-					_, err = file.Write(output)
-					if err != nil {
-						return toExitError(err)
-					}
-					log.Info("File written successfully")
-					return nil
+					return writeInPlace(fileName, output, false)
 				}
 
 				outputFile := os.Stdout
@@ -1435,19 +1407,11 @@ func main() {
 					}
 				}
 
-				// We open the file *after* the operations on the tree have been
-				// executed to avoid truncating it when there's errors
-				file, err := os.Create(fileName)
-				if err != nil {
-					return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
-				}
-				defer file.Close()
-				_, err = file.Write(output)
-				if err != nil {
-					return toExitError(err)
-				}
-				log.Info("File written successfully")
-				return nil
+				// The file is replaced only after the operations on the tree have
+				// succeeded, so that it is not truncated when there's errors. The
+				// output of edit is encrypted, unless --show-master-keys was used,
+				// in which case it contains the master keys and the plaintext.
+				return writeInPlace(fileName, output, c.Bool("show-master-keys"))
 			},
 		},
 		{
@@ -1571,19 +1535,9 @@ func main() {
 					return nil
 				}
 
-				// We open the file *after* the operations on the tree have been
-				// executed to avoid truncating it when there's errors
-				file, err := os.Create(fileName)
-				if err != nil {
-					return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
-				}
-				defer file.Close()
-				_, err = file.Write(output)
-				if err != nil {
-					return toExitError(err)
-				}
-				log.Info("File written successfully")
-				return nil
+				// The file is replaced only after the operations on the tree have
+				// succeeded, so that it is not truncated when there's errors
+				return writeInPlace(fileName, output, false)
 			},
 		},
 		{
@@ -1665,19 +1619,9 @@ func main() {
 					return toExitError(err)
 				}
 
-				// We open the file *after* the operations on the tree have been
-				// executed to avoid truncating it when there's errors
-				file, err := os.Create(fileName)
-				if err != nil {
-					return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
-				}
-				defer file.Close()
-				_, err = file.Write(output)
-				if err != nil {
-					return toExitError(err)
-				}
-				log.Info("File written successfully")
-				return nil
+				// The file is replaced only after the operations on the tree have
+				// succeeded, so that it is not truncated when there's errors
+				return writeInPlace(fileName, output, false)
 			},
 		},
 	}
@@ -2083,20 +2027,15 @@ func main() {
 			return toExitError(err)
 		}
 
-		// We open the file *after* the operations on the tree have been
-		// executed to avoid truncating it when there's errors
+		// The file is replaced only after the operations on the tree have
+		// succeeded, so that it is not truncated when there's errors
 		if c.Bool("in-place") || isEditMode || isSetMode {
-			file, err := os.Create(fileName)
-			if err != nil {
-				return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", err), codes.CouldNotWriteOutputFile)
-			}
-			defer file.Close()
-			_, err = file.Write(output)
-			if err != nil {
-				return toExitError(err)
-			}
-			log.Info("File written successfully")
-			return nil
+			// The output is plaintext when decrypting, or when editing with
+			// --show-master-keys. In those cases the file must not be readable
+			// by anyone but its owner.
+			decodeOnly := isDecryptMode && !isRotateMode && !isSetMode
+			private := decodeOnly || (isEditMode && c.Bool("show-master-keys"))
+			return writeInPlace(fileName, output, private)
 		}
 
 		outputFile := os.Stdout
@@ -2306,6 +2245,28 @@ func getRotateOpts(c *cli.Context, fileName string, inputStore common.Store, out
 		AddMasterKeys:    addMasterKeys,
 		RemoveMasterKeys: rmMasterKeys,
 	}, nil
+}
+
+// writeInPlace atomically replaces fileName with output. The new content is
+// written to a temporary file next to it, so that the original file is left
+// untouched if sops fails or is interrupted before the replacement is
+// complete. private must be set when output is plaintext, so that the result
+// is readable by its owner only.
+func writeInPlace(fileName string, output []byte, private bool) error {
+	err := common.WriteFileAtomic(common.AtomicWriteOpts{
+		Path:    fileName,
+		Data:    output,
+		Private: private,
+	})
+	if err != nil {
+		var openErr *common.AtomicWriteOpenError
+		if errors.As(err, &openErr) {
+			return common.NewExitError(fmt.Sprintf("Could not open in-place file for writing: %s", openErr.Err), codes.CouldNotWriteOutputFile)
+		}
+		return toExitError(err)
+	}
+	log.Info("File written successfully")
+	return nil
 }
 
 func toExitError(err error) error {

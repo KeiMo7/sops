@@ -49,15 +49,12 @@ func Delete(opts DeleteOpts) error {
 	if err != nil {
 		return err
 	}
-	var outputFile = os.Stdout
 	if opts.InPlace {
-		var err error
-		outputFile, err = os.Create(opts.InputPath)
-		if err != nil {
-			return err
-		}
-		defer outputFile.Close()
+		return common.WriteFileAtomic(common.AtomicWriteOpts{
+			Path: opts.InputPath,
+			Data: output,
+		})
 	}
-	outputFile.Write(output)
-	return nil
+	_, err = os.Stdout.Write(output)
+	return err
 }
